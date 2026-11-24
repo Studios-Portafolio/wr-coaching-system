@@ -16,12 +16,15 @@ import {
   Download,
   Target,
   Award,
+  Loader2,
+  Sparkles,
 } from 'lucide-react';
 import {
   WR_CHAMPIONS,
   getChampionIconUrl,
   type LaneType,
 } from '../data/champions';
+import { api } from '../services/api';
 
 type SideType = 'blue' | 'red';
 type ResultType = 'win' | 'loss';
@@ -42,12 +45,12 @@ interface ScrimMatch {
   patch: string;
   kills: number;
   deaths: number;
-  goldDiff8m: number; // ej: +1800 o -900
+  goldDiff8m: number;
   firstBlood: boolean;
   firstDragon: boolean;
   firstHerald: boolean;
   barons: number;
-  ourComp: [string, string, string, string, string]; // TOP, JG, MID, ADC, SUP
+  ourComp: [string, string, string, string, string];
   enemyComp: [string, string, string, string, string];
   mvp: string;
   focusGoal: string;
@@ -61,19 +64,16 @@ interface ScoutingProfile {
   threatLevel: 'S' | 'A' | 'B';
   playstyle: PlaystyleType;
   tendency: MapTendency;
-  priorityPicks: string[]; // IDs de campeones
-  priorityBans: string[]; // IDs de campeones
+  priorityPicks: string[];
+  priorityBans: string[];
   weakness: string;
   notes: string;
 }
 
-const STORAGE_SCRIMS_KEY = 'wr_hub_scrims_pro_v2';
-const STORAGE_SCOUTING_KEY = 'wr_hub_scouting_pro_v2';
 const ROLES: LaneType[] = ['TOP', 'JG', 'MID', 'ADC', 'SUP'];
 
-const INITIAL_SCRIMS: ScrimMatch[] = [
+const INITIAL_SCRIMS_TEMPLATE: Omit<ScrimMatch, 'id'>[] = [
   {
-    id: 'scr-1',
     date: '2026-11-22',
     opponent: 'Apex Academy',
     side: 'blue',
@@ -94,7 +94,6 @@ const INITIAL_SCRIMS: ScrimMatch[] = [
     notes: 'Excelente control de visión 45s antes del primer dragón. Castigamos bien su falta de frontlane.',
   },
   {
-    id: 'scr-2',
     date: '2026-11-22',
     opponent: 'Apex Academy',
     side: 'red',
@@ -115,7 +114,6 @@ const INITIAL_SCRIMS: ScrimMatch[] = [
     notes: 'Forzamos pelea en río sin prioridad de mid. Faltó respetar el reset de Viego.',
   },
   {
-    id: 'scr-3',
     date: '2026-11-21',
     opponent: 'Valkyrie Esports',
     side: 'red',
@@ -137,9 +135,8 @@ const INITIAL_SCRIMS: ScrimMatch[] = [
   },
 ];
 
-const INITIAL_SCOUTING: ScoutingProfile[] = [
+const INITIAL_SCOUTING_TEMPLATE: Omit<ScoutingProfile, 'id'>[] = [
   {
-    id: 'sct-1',
     teamName: 'Apex Academy',
     regionOrTier: 'Sovereign / Tier 2',
     threatLevel: 'A',
@@ -151,7 +148,6 @@ const INITIAL_SCOUTING: ScoutingProfile[] = [
     notes: 'Su jungla suele hacer pathing de Red hacia Botlane para dive al nivel 3.',
   },
   {
-    id: 'sct-2',
     teamName: 'Valkyrie Esports',
     regionOrTier: 'Sovereign / Tier 1',
     threatLevel: 'S',
@@ -180,20 +176,66 @@ const THREAT_BADGE: Record<'S' | 'A' | 'B', string> = {
 const getChampName = (id: string) =>
   WR_CHAMPIONS.find((c) => c.id === id)?.name || id;
 
+const normalizeComp = (arr: any): [string, string, string, string, string] => {
+  const list = Array.isArray(arr) ? arr : [];
+  return [
+    list[0] || 'Aatrox',
+    list[1] || 'LeeSin',
+    list[2] || 'Ahri',
+    list[3] || 'Kaisa',
+    list[4] || 'Thresh',
+  ];
+};
+
+const normalizeScrim = (raw: any): ScrimMatch => ({
+  id: String(raw.id),
+  date: raw.date || new Date().toISOString().slice(0, 10),
+  opponent: raw.opponent || 'Rival',
+  side: raw.side === 'red' ? 'red' : 'blue',
+  result: raw.result === 'loss' ? 'loss' : 'win',
+  durationMins: Number(raw.durationMins) || 17,
+  patch: raw.patch || '6.0',
+  kills: Number(raw.kills) || 0,
+  deaths: Number(raw.deaths) || 0,
+  goldDiff8m: Number(raw.goldDiff8m) || 0,
+  firstBlood: Boolean(raw.firstBlood),
+  firstDragon: Boolean(raw.firstDragon),
+  firstHerald: Boolean(raw.firstHerald),
+  barons: Number(raw.barons) || 0,
+  ourComp: normalizeComp(raw.ourComp),
+  enemyComp: normalizeComp(raw.enemyComp),
+  mvp: raw.mvp || 'Equipo',
+  focusGoal: raw.focusGoal || 'Ejecución general',
+  notes: raw.notes || '',
+});
+
+const normalizeScouting = (raw: any): ScoutingProfile => ({
+  id: String(raw.id),
+  teamName: raw.teamName || 'Equipo Rival',
+  regionOrTier: raw.regionOrTier || 'Competitivo',
+  threatLevel: (['S', 'A', 'B'].includes(raw.threatLevel) ? raw.threatLevel : 'A') as
+    | 'S'
+    | 'A'
+    | 'B',
+  playstyle: (raw.playstyle || 'Early Aggro') as PlaystyleType,
+  tendency: (raw.tendency || 'Play for Bot') as MapTendency,
+  priorityPicks: Array.isArray(raw.priorityPicks) ? raw.priorityPicks : [],
+  priorityBans: Array.isArray(raw.priorityBans) ? raw.priorityBans : [],
+  weakness: raw.weakness || 'Por analizar.',
+  notes: raw.notes || '',
+});
+
 export default function ScrimsScouting() {
   const [activeTab, setActiveTab] = useState<'scrims' | 'analytics' | 'scouting'>('scrims');
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Scrims
-  const [scrims, setScrims] = useState<ScrimMatch[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_SCRIMS_KEY);
-      return saved ? JSON.parse(saved) : INITIAL_SCRIMS;
-    } catch {
-      return INITIAL_SCRIMS;
-    }
-  });
+  const [scrims, setScrims] = useState<ScrimMatch[]>([]);
+  const [profiles, setProfiles] = useState<ScoutingProfile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
+  // Filtros Scrims
   const [opponentFilter, setOpponentFilter] = useState('');
   const [sideFilter, setSideFilter] = useState<'all' | SideType>('all');
   const [resultFilter, setResultFilter] = useState<'all' | ResultType>('all');
@@ -230,41 +272,48 @@ export default function ScrimsScouting() {
   const [fFocusGoal, setFFocusGoal] = useState('');
   const [fNotes, setFNotes] = useState('');
 
-  // Scouting
-  const [profiles, setProfiles] = useState<ScoutingProfile[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_SCOUTING_KEY);
-      return saved ? JSON.parse(saved) : INITIAL_SCOUTING;
-    } catch {
-      return INITIAL_SCOUTING;
-    }
-  });
-
+  // Filtros y modal Scouting
   const [scoutSearch, setScoutSearch] = useState('');
   const [showScoutModal, setShowScoutModal] = useState(false);
 
-  // Formulario de Scouting
   const [sTeam, setSTeam] = useState('');
   const [sTier, setSTier] = useState('Sovereign / Tier 2');
   const [sThreat, setSThreat] = useState<'S' | 'A' | 'B'>('A');
   const [sStyle, setSStyle] = useState<PlaystyleType>('Early Aggro');
   const [sTendency, setSTendency] = useState<MapTendency>('Play for Bot');
-  const [sPicks, setSPicks] = useState<string[]>(['LeeSin', 'Kaisa']);
-  const [sBans, setSBans] = useState<string[]>(['Lulu', 'Thresh']);
+  const [sPicks] = useState<string[]>(['LeeSin', 'Kaisa']);
+  const [sBans] = useState<string[]>(['Lulu', 'Thresh']);
   const [sWeakness, setSWeakness] = useState('');
   const [sNotes, setSNotes] = useState('');
 
+  // Carga inicial desde Supabase vía API
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_SCRIMS_KEY, JSON.stringify(scrims));
-    } catch {}
-  }, [scrims]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_SCOUTING_KEY, JSON.stringify(profiles));
-    } catch {}
-  }, [profiles]);
+    let active = true;
+    const loadAll = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [scrimsRes, scoutingRes] = await Promise.all([
+          api.scrims.getAll(),
+          api.scouting.getAll(),
+        ]);
+        if (!active) return;
+        setScrims(Array.isArray(scrimsRes) ? scrimsRes.map(normalizeScrim) : []);
+        setProfiles(
+          Array.isArray(scoutingRes) ? scoutingRes.map(normalizeScouting) : []
+        );
+      } catch (err: any) {
+        if (!active) return;
+        setError(err?.message || 'No se pudieron cargar los datos desde el servidor.');
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    loadAll();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Analítica calculada en tiempo real
   const stats = useMemo(() => {
@@ -299,7 +348,6 @@ export default function ScrimsScouting() {
       ? Math.round(scrims.reduce((a, s) => a + s.goldDiff8m, 0) / total)
       : 0;
 
-    // Estadísticas por campeón de nuestro equipo
     const champMap = new Map<string, { games: number; wins: number }>();
     scrims.forEach((m) => {
       m.ourComp.forEach((cId) => {
@@ -322,7 +370,6 @@ export default function ScrimsScouting() {
       .sort((a, b) => b.games - a.games || b.wr - a.wr)
       .slice(0, 8);
 
-    // Historial H2H por rival
     const oppMap = new Map<string, { games: number; wins: number }>();
     scrims.forEach((m) => {
       const key = m.opponent.trim();
@@ -360,13 +407,45 @@ export default function ScrimsScouting() {
     };
   }, [scrims]);
 
-  const handleAddScrim = (e: React.FormEvent) => {
+  const seedScrims = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const created = await Promise.all(
+        INITIAL_SCRIMS_TEMPLATE.map((item) => api.scrims.create(item))
+      );
+      setScrims(created.map(normalizeScrim));
+    } catch (err: any) {
+      setError(err?.message || 'Error al cargar scrims de ejemplo.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const seedScouting = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const created = await Promise.all(
+        INITIAL_SCOUTING_TEMPLATE.map((item) => api.scouting.create(item))
+      );
+      setProfiles(created.map(normalizeScouting));
+    } catch (err: any) {
+      setError(err?.message || 'Error al cargar perfiles de ejemplo.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddScrim = async (e: React.FormEvent) => {
     e.preventDefault();
     const opp = fOpponent.trim();
     if (!opp) return;
 
-    const item: ScrimMatch = {
-      id: `scr-${Date.now()}`,
+    setSaving(true);
+    setError(null);
+
+    const payload = {
       date: new Date().toISOString().slice(0, 10),
       opponent: opp,
       side: fSide,
@@ -380,28 +459,48 @@ export default function ScrimsScouting() {
       firstDragon: fFirstDragon,
       firstHerald: fFirstHerald,
       barons: Math.max(0, Number(fBarons) || 0),
-      ourComp: [...fOurComp] as [string, string, string, string, string],
-      enemyComp: [...fEnemyComp] as [string, string, string, string, string],
+      ourComp: [...fOurComp],
+      enemyComp: [...fEnemyComp],
       mvp: fMvp.trim() || 'Equipo',
       focusGoal: fFocusGoal.trim() || 'Ejecución general',
       notes: fNotes.trim() || 'Sin observaciones adicionales.',
     };
 
-    setScrims((prev) => [item, ...prev]);
-    setFOpponent('');
-    setFMvp('');
-    setFFocusGoal('');
-    setFNotes('');
-    setShowScrimModal(false);
+    try {
+      const created = await api.scrims.create(payload);
+      setScrims((prev) => [normalizeScrim(created), ...prev]);
+      setFOpponent('');
+      setFMvp('');
+      setFFocusGoal('');
+      setFNotes('');
+      setShowScrimModal(false);
+    } catch (err: any) {
+      setError(err?.message || 'No se pudo guardar el scrim.');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleAddScout = (e: React.FormEvent) => {
+  const handleDeleteScrim = async (id: string) => {
+    const previous = scrims;
+    setScrims((prev) => prev.filter((item) => item.id !== id));
+    try {
+      await api.scrims.delete(id);
+    } catch (err: any) {
+      setScrims(previous);
+      setError(err?.message || 'No se pudo eliminar el scrim.');
+    }
+  };
+
+  const handleAddScout = async (e: React.FormEvent) => {
     e.preventDefault();
     const team = sTeam.trim();
     if (!team) return;
 
-    const item: ScoutingProfile = {
-      id: `sct-${Date.now()}`,
+    setSaving(true);
+    setError(null);
+
+    const payload = {
       teamName: team,
       regionOrTier: sTier.trim() || 'Competitivo',
       threatLevel: sThreat,
@@ -413,11 +512,29 @@ export default function ScrimsScouting() {
       notes: sNotes.trim(),
     };
 
-    setProfiles((prev) => [item, ...prev]);
-    setSTeam('');
-    setSWeakness('');
-    setSNotes('');
-    setShowScoutModal(false);
+    try {
+      const created = await api.scouting.create(payload);
+      setProfiles((prev) => [normalizeScouting(created), ...prev]);
+      setSTeam('');
+      setSWeakness('');
+      setSNotes('');
+      setShowScoutModal(false);
+    } catch (err: any) {
+      setError(err?.message || 'No se pudo guardar la ficha de scouting.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteScout = async (id: string) => {
+    const previous = profiles;
+    setProfiles((prev) => prev.filter((p) => p.id !== id));
+    try {
+      await api.scouting.delete(id);
+    } catch (err: any) {
+      setProfiles(previous);
+      setError(err?.message || 'No se pudo eliminar la ficha de scouting.');
+    }
   };
 
   const exportJson = () => {
@@ -464,7 +581,7 @@ export default function ScrimsScouting() {
               Scrims, Macro Analytics & Scouting
             </h2>
             <p className="text-[11px] text-zinc-400">
-              Drafts por mapa, control de objetivos, oro al min 8 y perfiles rivales
+              Conectado a Supabase · Drafts, objetivos y perfiles rivales
             </p>
           </div>
         </div>
@@ -536,6 +653,19 @@ export default function ScrimsScouting() {
         </div>
       </div>
 
+      {/* Banner de error */}
+      {error && (
+        <div className="flex items-center justify-between rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs text-red-300">
+          <span>{error}</span>
+          <button
+            onClick={() => setError(null)}
+            className="rounded p-1 hover:bg-red-500/20"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* KPIs Compactos */}
       <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-5">
         <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/50 px-3.5 py-2.5">
@@ -599,462 +729,525 @@ export default function ScrimsScouting() {
         </div>
       </div>
 
-      {/* PESTAÑA 1: HISTORIAL DE SCRIMS CON DRAFTS Y OBJETIVOS */}
-      {activeTab === 'scrims' && (
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-4">
-          {/* Filtros */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative max-w-xs flex-1">
-              <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-500" />
-              <input
-                type="text"
-                value={opponentFilter}
-                onChange={(e) => setOpponentFilter(e.target.value)}
-                placeholder="Buscar rival..."
-                className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-1.5 pl-8 pr-7 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-violet-500"
-              />
-              {opponentFilter && (
-                <button
-                  onClick={() => setOpponentFilter('')}
-                  className="absolute right-2 top-2 text-zinc-500 hover:text-zinc-200"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-
-            <div className="flex gap-1">
-              {(['all', 'blue', 'red'] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setSideFilter(s)}
-                  className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition ${
-                    sideFilter === s
-                      ? 'bg-violet-600 text-white'
-                      : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'
-                  }`}
-                >
-                  {s === 'all' ? 'Ambos Lados' : s === 'blue' ? 'Azul' : 'Rojo'}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex gap-1">
-              {(['all', 'win', 'loss'] as const).map((r) => (
-                <button
-                  key={r}
-                  onClick={() => setResultFilter(r)}
-                  className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition ${
-                    resultFilter === r
-                      ? 'bg-zinc-100 text-zinc-950'
-                      : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'
-                  }`}
-                >
-                  {r === 'all' ? 'Todos' : r === 'win' ? 'Victorias' : 'Derrotas'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Lista de Mapas */}
-          <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1">
-            {filteredScrims.length === 0 ? (
-              <div className="flex h-40 items-center justify-center text-xs text-zinc-500">
-                No hay scrims que coincidan con los filtros.
-              </div>
-            ) : (
-              filteredScrims.map((m) => {
-                const isOpen = expandedId === m.id;
-                return (
-                  <div
-                    key={m.id}
-                    className="overflow-hidden rounded-xl border border-zinc-800/90 bg-zinc-900/60 transition hover:border-zinc-700"
-                  >
-                    {/* Fila Resumen */}
-                    <div
-                      onClick={() => setExpandedId(isOpen ? null : m.id)}
-                      className="flex cursor-pointer flex-wrap items-center justify-between gap-3 px-4 py-3"
+      {/* ESTADO DE CARGA */}
+      {loading ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-zinc-800/80 bg-zinc-900/40 text-zinc-400">
+          <Loader2 className="h-6 w-6 animate-spin text-violet-400" />
+          <p className="text-xs">Cargando scrims y scouting desde Supabase...</p>
+        </div>
+      ) : (
+        <>
+          {/* PESTAÑA 1: HISTORIAL DE SCRIMS CON DRAFTS Y OBJETIVOS */}
+          {activeTab === 'scrims' && (
+            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-4">
+              {/* Filtros */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative max-w-xs flex-1">
+                  <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-500" />
+                  <input
+                    type="text"
+                    value={opponentFilter}
+                    onChange={(e) => setOpponentFilter(e.target.value)}
+                    placeholder="Buscar rival..."
+                    className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-1.5 pl-8 pr-7 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-violet-500"
+                  />
+                  {opponentFilter && (
+                    <button
+                      onClick={() => setOpponentFilter('')}
+                      className="absolute right-2 top-2 text-zinc-500 hover:text-zinc-200"
                     >
-                      <div className="flex items-center gap-3">
-                        <span
-                          className={`w-16 rounded-lg border py-1 text-center text-[11px] font-bold uppercase ${
-                            m.result === 'win'
-                              ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
-                              : 'border-red-500/30 bg-red-500/15 text-red-300'
-                          }`}
-                        >
-                          {m.result === 'win' ? 'WIN' : 'LOSS'}
-                        </span>
-
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-zinc-100">
-                              vs {m.opponent}
-                            </span>
-                            <span
-                              className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
-                                m.side === 'blue'
-                                  ? 'bg-blue-500/15 text-blue-300'
-                                  : 'bg-red-500/15 text-red-300'
-                              }`}
-                            >
-                              {m.side === 'blue' ? 'Azul' : 'Rojo'}
-                            </span>
-                            <span className="font-mono text-xs text-zinc-300">
-                              {m.kills} - {m.deaths}
-                            </span>
-                            <span className="font-mono text-[11px] text-zinc-500">
-                              {m.durationMins}m
-                            </span>
-                          </div>
-                          <p className="mt-0.5 text-[11px] text-zinc-400">
-                            Objetivo: <span className="text-zinc-200">{m.focusGoal}</span>
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Retratos de nuestra comp vs rival */}
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1">
-                          {m.ourComp.map((cId, i) => (
-                            <img
-                              key={`o-${i}`}
-                              src={getChampionIconUrl(cId)}
-                              alt={cId}
-                              title={`${ROLES[i]}: ${getChampName(cId)}`}
-                              className="h-7 w-7 rounded-md border border-blue-500/40 object-cover"
-                            />
-                          ))}
-                        </div>
-                        <span className="text-[10px] font-bold text-zinc-600">VS</span>
-                        <div className="flex items-center gap-1">
-                          {m.enemyComp.map((cId, i) => (
-                            <img
-                              key={`e-${i}`}
-                              src={getChampionIconUrl(cId)}
-                              alt={cId}
-                              title={`${ROLES[i]}: ${getChampName(cId)}`}
-                              className="h-7 w-7 rounded-md border border-red-500/40 object-cover opacity-85"
-                            />
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Badges de macro + expandir */}
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`rounded px-2 py-0.5 font-mono text-[11px] font-semibold ${
-                            m.goldDiff8m >= 0
-                              ? 'bg-emerald-500/10 text-emerald-300'
-                              : 'bg-red-500/10 text-red-300'
-                          }`}
-                        >
-                          @8m: {m.goldDiff8m >= 0 ? `+${m.goldDiff8m}` : m.goldDiff8m}
-                        </span>
-                        <span className="font-mono text-[11px] text-zinc-500">{m.date}</span>
-                        {isOpen ? (
-                          <ChevronUp className="h-4 w-4 text-zinc-400" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4 text-zinc-400" />
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Detalle Expandido */}
-                    {isOpen && (
-                      <div className="border-t border-zinc-800/80 bg-zinc-950/60 px-4 py-3">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                            <span
-                              className={`rounded-md border px-2 py-0.5 font-semibold ${
-                                m.firstBlood
-                                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                                  : 'border-zinc-800 bg-zinc-900 text-zinc-500'
-                              }`}
-                            >
-                              1ra Sangre: {m.firstBlood ? 'Sí' : 'No'}
-                            </span>
-                            <span
-                              className={`rounded-md border px-2 py-0.5 font-semibold ${
-                                m.firstDragon
-                                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-                                  : 'border-zinc-800 bg-zinc-900 text-zinc-500'
-                              }`}
-                            >
-                              1er Dragón: {m.firstDragon ? 'Sí' : 'No'}
-                            </span>
-                            <span
-                              className={`rounded-md border px-2 py-0.5 font-semibold ${
-                                m.firstHerald
-                                  ? 'border-violet-500/30 bg-violet-500/10 text-violet-300'
-                                  : 'border-zinc-800 bg-zinc-900 text-zinc-500'
-                              }`}
-                            >
-                              1er Heraldo: {m.firstHerald ? 'Sí' : 'No'}
-                            </span>
-                            <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-0.5 font-semibold text-zinc-300">
-                              Barones: {m.barons}
-                            </span>
-                            <span className="flex items-center gap-1 rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 font-semibold text-violet-300">
-                              <Award className="h-3 w-3" /> MVP: {m.mvp}
-                            </span>
-                          </div>
-
-                          <button
-                            onClick={() =>
-                              setScrims((prev) => prev.filter((item) => item.id !== m.id))
-                            }
-                            className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-900 hover:text-red-400"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            <span>Eliminar</span>
-                          </button>
-                        </div>
-
-                        <p className="mt-2.5 text-xs leading-relaxed text-zinc-300">
-                          <span className="font-semibold text-zinc-400">Notas del Coach: </span>
-                          {m.notes}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* PESTAÑA 2: ANALÍTICA AUTOMÁTICA */}
-      {activeTab === 'analytics' && (
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto pr-1 lg:grid-cols-2">
-          {/* Campeones más jugados */}
-          <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/50 p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <Flame className="h-4 w-4 text-violet-400" />
-              <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-200">
-                Campeones Más Jugados (Nuestro Equipo)
-              </h3>
-            </div>
-            <div className="space-y-2">
-              {stats.topChamps.length === 0 ? (
-                <p className="py-6 text-center text-xs text-zinc-500">
-                  Registra scrims para ver estadísticas de campeones.
-                </p>
-              ) : (
-                stats.topChamps.map((c) => (
-                  <div
-                    key={c.id}
-                    className="flex items-center justify-between rounded-xl border border-zinc-800/80 bg-zinc-950/70 px-3 py-2"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <img
-                        src={getChampionIconUrl(c.id)}
-                        alt={c.name}
-                        className="h-8 w-8 rounded-lg border border-zinc-700 object-cover"
-                      />
-                      <div>
-                        <p className="text-xs font-semibold text-zinc-100">{c.name}</p>
-                        <p className="text-[10px] text-zinc-500">
-                          {c.games} {c.games === 1 ? 'mapa' : 'mapas'} ({c.wins}W -{' '}
-                          {c.games - c.wins}L)
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-zinc-800">
-                        <div
-                          className="h-full rounded-full bg-violet-500"
-                          style={{ width: `${c.wr}%` }}
-                        />
-                      </div>
-                      <span className="w-10 text-right font-mono text-xs font-bold text-zinc-200">
-                        {c.wr}%
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Historial Directo (H2H) contra Rivales */}
-          <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/50 p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <Trophy className="h-4 w-4 text-amber-400" />
-              <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-200">
-                Rendimiento por Rival (H2H)
-              </h3>
-            </div>
-            <div className="space-y-2">
-              {stats.h2h.length === 0 ? (
-                <p className="py-6 text-center text-xs text-zinc-500">
-                  Aún no hay rivales registrados.
-                </p>
-              ) : (
-                stats.h2h.map((row) => (
-                  <div
-                    key={row.opponent}
-                    className="flex items-center justify-between rounded-xl border border-zinc-800/80 bg-zinc-950/70 px-3.5 py-2.5"
-                  >
-                    <div>
-                      <p className="text-xs font-bold text-zinc-100">{row.opponent}</p>
-                      <p className="text-[10px] text-zinc-500">
-                        {row.games} {row.games === 1 ? 'mapa jugado' : 'mapas jugados'}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono text-xs font-semibold text-emerald-400">
-                        {row.wins}W
-                      </span>
-                      <span className="font-mono text-xs font-semibold text-red-400">
-                        {row.losses}L
-                      </span>
-                      <span className="rounded-md bg-zinc-900 px-2 py-0.5 font-mono text-xs font-bold text-zinc-200">
-                        {row.wr}%
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* PESTAÑA 3: SCOUTING DE RIVALES VISUAL */}
-      {activeTab === 'scouting' && (
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-4">
-          <div className="relative max-w-md">
-            <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-500" />
-            <input
-              type="text"
-              value={scoutSearch}
-              onChange={(e) => setScoutSearch(e.target.value)}
-              placeholder="Buscar equipo rival, estilo o campeón..."
-              className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-1.5 pl-8 pr-7 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-violet-500"
-            />
-            {scoutSearch && (
-              <button
-                onClick={() => setScoutSearch('')}
-                className="absolute right-2 top-2 text-zinc-500 hover:text-zinc-200"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-
-          <div className="grid min-h-0 flex-1 content-start grid-cols-1 gap-3 overflow-y-auto pr-1 md:grid-cols-2 lg:grid-cols-3">
-            {filteredProfiles.map((prof) => {
-              const h2hRecord = stats.h2h.find(
-                (h) => h.opponent.toLowerCase() === prof.teamName.toLowerCase()
-              );
-              return (
-                <div
-                  key={prof.id}
-                  className="group flex flex-col justify-between rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 transition hover:border-violet-500/40"
-                >
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <Users className="h-4 w-4 text-violet-400" />
-                          <h3 className="text-sm font-bold text-zinc-100">
-                            {prof.teamName}
-                          </h3>
-                          <span
-                            className={`rounded border px-1.5 py-0.5 text-[10px] font-bold ${THREAT_BADGE[prof.threatLevel]}`}
-                          >
-                            Tier {prof.threatLevel}
-                          </span>
-                        </div>
-                        <p className="mt-0.5 text-[11px] text-zinc-500">
-                          {prof.regionOrTier}
-                          {h2hRecord && (
-                            <span className="ml-2 font-mono text-violet-300">
-                              · H2H: {h2hRecord.wins}W-{h2hRecord.losses}L
-                            </span>
-                          )}
-                        </p>
-                      </div>
-
-                      <button
-                        onClick={() =>
-                          setProfiles((prev) => prev.filter((p) => p.id !== prof.id))
-                        }
-                        className="rounded p-1 text-zinc-600 opacity-0 transition hover:text-red-400 group-hover:opacity-100"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-
-                    <div className="mt-2.5 flex flex-wrap gap-1.5">
-                      <span
-                        className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold ${PLAYSTYLE_BADGE[prof.playstyle]}`}
-                      >
-                        {prof.playstyle}
-                      </span>
-                      <span className="flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[10px] font-semibold text-zinc-300">
-                        <Target className="h-3 w-3 text-violet-400" />
-                        {prof.tendency}
-                      </span>
-                    </div>
-
-                    {/* Picks y Bans con Retratos */}
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <div>
-                        <span className="text-[10px] font-bold uppercase text-emerald-400">
-                          Picks Prioritarios
-                        </span>
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {prof.priorityPicks.map((id) => (
-                            <img
-                              key={id}
-                              src={getChampionIconUrl(id)}
-                              alt={id}
-                              title={getChampName(id)}
-                              className="h-7 w-7 rounded-md border border-emerald-500/40 object-cover"
-                            />
-                          ))}
-                        </div>
-                      </div>
-
-                      <div>
-                        <span className="text-[10px] font-bold uppercase text-red-400">
-                          Bans Clave
-                        </span>
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {prof.priorityBans.map((id) => (
-                            <img
-                              key={id}
-                              src={getChampionIconUrl(id)}
-                              alt={id}
-                              title={getChampName(id)}
-                              className="h-7 w-7 rounded-md border border-red-500/40 object-cover grayscale"
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 text-xs">
-                      <span className="text-[10px] font-bold uppercase text-amber-400">
-                        Cómo castigarlos
-                      </span>
-                      <p className="mt-0.5 text-zinc-300">{prof.weakness}</p>
-                    </div>
-                  </div>
-
-                  {prof.notes && (
-                    <p className="mt-3 border-t border-zinc-800/80 pt-2 text-[11px] italic text-zinc-400">
-                      "{prof.notes}"
-                    </p>
+                      <X className="h-3.5 w-3.5" />
+                    </button>
                   )}
                 </div>
-              );
-            })}
-          </div>
-        </div>
+
+                <div className="flex gap-1">
+                  {(['all', 'blue', 'red'] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setSideFilter(s)}
+                      className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition ${
+                        sideFilter === s
+                          ? 'bg-violet-600 text-white'
+                          : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      {s === 'all' ? 'Ambos Lados' : s === 'blue' ? 'Azul' : 'Rojo'}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex gap-1">
+                  {(['all', 'win', 'loss'] as const).map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => setResultFilter(r)}
+                      className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition ${
+                        resultFilter === r
+                          ? 'bg-zinc-100 text-zinc-950'
+                          : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      {r === 'all' ? 'Todos' : r === 'win' ? 'Victorias' : 'Derrotas'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Lista de Mapas */}
+              <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1">
+                {scrims.length === 0 ? (
+                  <div className="flex h-full flex-col items-center justify-center gap-3 py-10 text-center">
+                    <Swords className="h-8 w-8 text-zinc-600" />
+                    <div>
+                      <p className="text-sm font-bold text-zinc-200">
+                        Sin scrims registrados en Supabase
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        Registra tu primer mapa o carga 3 scrims de ejemplo.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        disabled={saving}
+                        onClick={seedScrims}
+                        className="flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-700 disabled:opacity-50"
+                      >
+                        <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                        <span>{saving ? 'Cargando...' : 'Cargar ejemplos'}</span>
+                      </button>
+                      <button
+                        onClick={() => setShowScrimModal(true)}
+                        className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-500"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>Registrar Scrim</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : filteredScrims.length === 0 ? (
+                  <div className="flex h-40 items-center justify-center text-xs text-zinc-500">
+                    No hay scrims que coincidan con los filtros.
+                  </div>
+                ) : (
+                  filteredScrims.map((m) => {
+                    const isOpen = expandedId === m.id;
+                    return (
+                      <div
+                        key={m.id}
+                        className="overflow-hidden rounded-xl border border-zinc-800/90 bg-zinc-900/60 transition hover:border-zinc-700"
+                      >
+                        {/* Fila Resumen */}
+                        <div
+                          onClick={() => setExpandedId(isOpen ? null : m.id)}
+                          className="flex cursor-pointer flex-wrap items-center justify-between gap-3 px-4 py-3"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span
+                              className={`w-16 rounded-lg border py-1 text-center text-[11px] font-bold uppercase ${
+                                m.result === 'win'
+                                  ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
+                                  : 'border-red-500/30 bg-red-500/15 text-red-300'
+                              }`}
+                            >
+                              {m.result === 'win' ? 'WIN' : 'LOSS'}
+                            </span>
+
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-bold text-zinc-100">
+                                  vs {m.opponent}
+                                </span>
+                                <span
+                                  className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                                    m.side === 'blue'
+                                      ? 'bg-blue-500/15 text-blue-300'
+                                      : 'bg-red-500/15 text-red-300'
+                                  }`}
+                                >
+                                  {m.side === 'blue' ? 'Azul' : 'Rojo'}
+                                </span>
+                                <span className="font-mono text-xs text-zinc-300">
+                                  {m.kills} - {m.deaths}
+                                </span>
+                                <span className="font-mono text-[11px] text-zinc-500">
+                                  {m.durationMins}m
+                                </span>
+                              </div>
+                              <p className="mt-0.5 text-[11px] text-zinc-400">
+                                Objetivo: <span className="text-zinc-200">{m.focusGoal}</span>
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Retratos de nuestra comp vs rival */}
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-1">
+                              {m.ourComp.map((cId, i) => (
+                                <img
+                                  key={`o-${i}`}
+                                  src={getChampionIconUrl(cId)}
+                                  alt={cId}
+                                  title={`${ROLES[i]}: ${getChampName(cId)}`}
+                                  className="h-7 w-7 rounded-md border border-blue-500/40 object-cover"
+                                />
+                              ))}
+                            </div>
+                            <span className="text-[10px] font-bold text-zinc-600">VS</span>
+                            <div className="flex items-center gap-1">
+                              {m.enemyComp.map((cId, i) => (
+                                <img
+                                  key={`e-${i}`}
+                                  src={getChampionIconUrl(cId)}
+                                  alt={cId}
+                                  title={`${ROLES[i]}: ${getChampName(cId)}`}
+                                  className="h-7 w-7 rounded-md border border-red-500/40 object-cover opacity-85"
+                                />
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Badges de macro + expandir */}
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`rounded px-2 py-0.5 font-mono text-[11px] font-semibold ${
+                                m.goldDiff8m >= 0
+                                  ? 'bg-emerald-500/10 text-emerald-300'
+                                  : 'bg-red-500/10 text-red-300'
+                              }`}
+                            >
+                              @8m: {m.goldDiff8m >= 0 ? `+${m.goldDiff8m}` : m.goldDiff8m}
+                            </span>
+                            <span className="font-mono text-[11px] text-zinc-500">{m.date}</span>
+                            {isOpen ? (
+                              <ChevronUp className="h-4 w-4 text-zinc-400" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4 text-zinc-400" />
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Detalle Expandido */}
+                        {isOpen && (
+                          <div className="border-t border-zinc-800/80 bg-zinc-950/60 px-4 py-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                <span
+                                  className={`rounded-md border px-2 py-0.5 font-semibold ${
+                                    m.firstBlood
+                                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                                      : 'border-zinc-800 bg-zinc-900 text-zinc-500'
+                                  }`}
+                                >
+                                  1ra Sangre: {m.firstBlood ? 'Sí' : 'No'}
+                                </span>
+                                <span
+                                  className={`rounded-md border px-2 py-0.5 font-semibold ${
+                                    m.firstDragon
+                                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                                      : 'border-zinc-800 bg-zinc-900 text-zinc-500'
+                                  }`}
+                                >
+                                  1er Dragón: {m.firstDragon ? 'Sí' : 'No'}
+                                </span>
+                                <span
+                                  className={`rounded-md border px-2 py-0.5 font-semibold ${
+                                    m.firstHerald
+                                      ? 'border-violet-500/30 bg-violet-500/10 text-violet-300'
+                                      : 'border-zinc-800 bg-zinc-900 text-zinc-500'
+                                  }`}
+                                >
+                                  1er Heraldo: {m.firstHerald ? 'Sí' : 'No'}
+                                </span>
+                                <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-0.5 font-semibold text-zinc-300">
+                                  Barones: {m.barons}
+                                </span>
+                                <span className="flex items-center gap-1 rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 font-semibold text-violet-300">
+                                  <Award className="h-3 w-3" /> MVP: {m.mvp}
+                                </span>
+                              </div>
+
+                              <button
+                                onClick={() => handleDeleteScrim(m.id)}
+                                className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-900 hover:text-red-400"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                <span>Eliminar</span>
+                              </button>
+                            </div>
+
+                            <p className="mt-2.5 text-xs leading-relaxed text-zinc-300">
+                              <span className="font-semibold text-zinc-400">Notas del Coach: </span>
+                              {m.notes}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* PESTAÑA 2: ANALÍTICA AUTOMÁTICA */}
+          {activeTab === 'analytics' && (
+            <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto pr-1 lg:grid-cols-2">
+              <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/50 p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <Flame className="h-4 w-4 text-violet-400" />
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-200">
+                    Campeones Más Jugados (Nuestro Equipo)
+                  </h3>
+                </div>
+                <div className="space-y-2">
+                  {stats.topChamps.length === 0 ? (
+                    <p className="py-6 text-center text-xs text-zinc-500">
+                      Registra scrims para ver estadísticas de campeones.
+                    </p>
+                  ) : (
+                    stats.topChamps.map((c) => (
+                      <div
+                        key={c.id}
+                        className="flex items-center justify-between rounded-xl border border-zinc-800/80 bg-zinc-950/70 px-3 py-2"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <img
+                            src={getChampionIconUrl(c.id)}
+                            alt={c.name}
+                            className="h-8 w-8 rounded-lg border border-zinc-700 object-cover"
+                          />
+                          <div>
+                            <p className="text-xs font-semibold text-zinc-100">{c.name}</p>
+                            <p className="text-[10px] text-zinc-500">
+                              {c.games} {c.games === 1 ? 'mapa' : 'mapas'} ({c.wins}W -{' '}
+                              {c.games - c.wins}L)
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="h-1.5 w-24 overflow-hidden rounded-full bg-zinc-800">
+                            <div
+                              className="h-full rounded-full bg-violet-500"
+                              style={{ width: `${c.wr}%` }}
+                            />
+                          </div>
+                          <span className="w-10 text-right font-mono text-xs font-bold text-zinc-200">
+                            {c.wr}%
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/50 p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <Trophy className="h-4 w-4 text-amber-400" />
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-200">
+                    Rendimiento por Rival (H2H)
+                  </h3>
+                </div>
+                <div className="space-y-2">
+                  {stats.h2h.length === 0 ? (
+                    <p className="py-6 text-center text-xs text-zinc-500">
+                      Aún no hay rivales registrados.
+                    </p>
+                  ) : (
+                    stats.h2h.map((row) => (
+                      <div
+                        key={row.opponent}
+                        className="flex items-center justify-between rounded-xl border border-zinc-800/80 bg-zinc-950/70 px-3.5 py-2.5"
+                      >
+                        <div>
+                          <p className="text-xs font-bold text-zinc-100">{row.opponent}</p>
+                          <p className="text-[10px] text-zinc-500">
+                            {row.games} {row.games === 1 ? 'mapa jugado' : 'mapas jugados'}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="font-mono text-xs font-semibold text-emerald-400">
+                            {row.wins}W
+                          </span>
+                          <span className="font-mono text-xs font-semibold text-red-400">
+                            {row.losses}L
+                          </span>
+                          <span className="rounded-md bg-zinc-900 px-2 py-0.5 font-mono text-xs font-bold text-zinc-200">
+                            {row.wr}%
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* PESTAÑA 3: SCOUTING DE RIVALES VISUAL */}
+          {activeTab === 'scouting' && (
+            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-950/60 p-4">
+              <div className="relative max-w-md">
+                <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-500" />
+                <input
+                  type="text"
+                  value={scoutSearch}
+                  onChange={(e) => setScoutSearch(e.target.value)}
+                  placeholder="Buscar equipo rival, estilo o campeón..."
+                  className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-1.5 pl-8 pr-7 text-xs text-zinc-100 placeholder-zinc-500 outline-none focus:border-violet-500"
+                />
+                {scoutSearch && (
+                  <button
+                    onClick={() => setScoutSearch('')}
+                    className="absolute right-2 top-2 text-zinc-500 hover:text-zinc-200"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {profiles.length === 0 ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-3 py-10 text-center">
+                  <ShieldAlert className="h-8 w-8 text-zinc-600" />
+                  <div>
+                    <p className="text-sm font-bold text-zinc-200">
+                      Sin perfiles de scouting en Supabase
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      Crea una ficha nueva o carga los 2 equipos de ejemplo.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      disabled={saving}
+                      onClick={seedScouting}
+                      className="flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-700 disabled:opacity-50"
+                    >
+                      <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                      <span>{saving ? 'Cargando...' : 'Cargar ejemplos'}</span>
+                    </button>
+                    <button
+                      onClick={() => setShowScoutModal(true)}
+                      className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-500"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>Nuevo Rival</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid min-h-0 flex-1 content-start grid-cols-1 gap-3 overflow-y-auto pr-1 md:grid-cols-2 lg:grid-cols-3">
+                  {filteredProfiles.map((prof) => {
+                    const h2hRecord = stats.h2h.find(
+                      (h) => h.opponent.toLowerCase() === prof.teamName.toLowerCase()
+                    );
+                    return (
+                      <div
+                        key={prof.id}
+                        className="group flex flex-col justify-between rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 transition hover:border-violet-500/40"
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <Users className="h-4 w-4 text-violet-400" />
+                                <h3 className="text-sm font-bold text-zinc-100">
+                                  {prof.teamName}
+                                </h3>
+                                <span
+                                  className={`rounded border px-1.5 py-0.5 text-[10px] font-bold ${THREAT_BADGE[prof.threatLevel]}`}
+                                >
+                                  Tier {prof.threatLevel}
+                                </span>
+                              </div>
+                              <p className="mt-0.5 text-[11px] text-zinc-500">
+                                {prof.regionOrTier}
+                                {h2hRecord && (
+                                  <span className="ml-2 font-mono text-violet-300">
+                                    · H2H: {h2hRecord.wins}W-{h2hRecord.losses}L
+                                  </span>
+                                )}
+                              </p>
+                            </div>
+
+                            <button
+                              onClick={() => handleDeleteScout(prof.id)}
+                              className="rounded p-1 text-zinc-600 opacity-0 transition hover:text-red-400 group-hover:opacity-100"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+
+                          <div className="mt-2.5 flex flex-wrap gap-1.5">
+                            <span
+                              className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold ${PLAYSTYLE_BADGE[prof.playstyle]}`}
+                            >
+                              {prof.playstyle}
+                            </span>
+                            <span className="flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[10px] font-semibold text-zinc-300">
+                              <Target className="h-3 w-3 text-violet-400" />
+                              {prof.tendency}
+                            </span>
+                          </div>
+
+                          <div className="mt-3 grid grid-cols-2 gap-2">
+                            <div>
+                              <span className="text-[10px] font-bold uppercase text-emerald-400">
+                                Picks Prioritarios
+                              </span>
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {prof.priorityPicks.map((id) => (
+                                  <img
+                                    key={id}
+                                    src={getChampionIconUrl(id)}
+                                    alt={id}
+                                    title={getChampName(id)}
+                                    className="h-7 w-7 rounded-md border border-emerald-500/40 object-cover"
+                                  />
+                                ))}
+                              </div>
+                            </div>
+
+                            <div>
+                              <span className="text-[10px] font-bold uppercase text-red-400">
+                                Bans Clave
+                              </span>
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {prof.priorityBans.map((id) => (
+                                  <img
+                                    key={id}
+                                    src={getChampionIconUrl(id)}
+                                    alt={id}
+                                    title={getChampName(id)}
+                                    className="h-7 w-7 rounded-md border border-red-500/40 object-cover grayscale"
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 text-xs">
+                            <span className="text-[10px] font-bold uppercase text-amber-400">
+                              Cómo castigarlos
+                            </span>
+                            <p className="mt-0.5 text-zinc-300">{prof.weakness}</p>
+                          </div>
+                        </div>
+
+                        {prof.notes && (
+                          <p className="mt-3 border-t border-zinc-800/80 pt-2 text-[11px] italic text-zinc-400">
+                            "{prof.notes}"
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {/* MODAL REGISTRAR SCRIM AVANZADO */}
@@ -1112,7 +1305,6 @@ export default function ScrimsScouting() {
               </div>
             </div>
 
-            {/* Métricas de partida */}
             <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-5">
               <div>
                 <label className="mb-1 block text-[11px] text-zinc-400">Kills</label>
@@ -1166,38 +1358,46 @@ export default function ScrimsScouting() {
               </div>
             </div>
 
-            {/* Checkboxes de Objetivos */}
-            <div className="flex flex-wrap gap-3 rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-xs text-zinc-300">
-              <label className="flex cursor-pointer items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-xs text-zinc-300">
+              <div className="flex flex-wrap gap-3">
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={fFirstBlood}
+                    onChange={(e) => setFFirstBlood(e.target.checked)}
+                    className="accent-violet-500"
+                  />
+                  Primera Sangre
+                </label>
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={fFirstDragon}
+                    onChange={(e) => setFFirstDragon(e.target.checked)}
+                    className="accent-violet-500"
+                  />
+                  Primer Dragón
+                </label>
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={fFirstHerald}
+                    onChange={(e) => setFFirstHerald(e.target.checked)}
+                    className="accent-violet-500"
+                  />
+                  Primer Heraldo
+                </label>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-zinc-400">Parche:</span>
                 <input
-                  type="checkbox"
-                  checked={fFirstBlood}
-                  onChange={(e) => setFFirstBlood(e.target.checked)}
-                  className="accent-violet-500"
+                  value={fPatch}
+                  onChange={(e) => setFPatch(e.target.value)}
+                  className="w-16 rounded border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-xs text-zinc-100 outline-none"
                 />
-                Primera Sangre
-              </label>
-              <label className="flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={fFirstDragon}
-                  onChange={(e) => setFFirstDragon(e.target.checked)}
-                  className="accent-violet-500"
-                />
-                Primer Dragón
-              </label>
-              <label className="flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={fFirstHerald}
-                  onChange={(e) => setFFirstHerald(e.target.checked)}
-                  className="accent-violet-500"
-                />
-                Primer Heraldo
-              </label>
+              </div>
             </div>
 
-            {/* Selectores de Composición (Nuestro Equipo vs Rival) */}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-1.5 rounded-xl border border-blue-500/20 bg-zinc-950/60 p-3">
                 <p className="text-[10px] font-bold uppercase text-blue-400">
@@ -1296,9 +1496,10 @@ export default function ScrimsScouting() {
               </button>
               <button
                 type="submit"
-                className="rounded-lg bg-violet-600 px-4 py-2 text-xs font-semibold text-white hover:bg-violet-500"
+                disabled={saving}
+                className="rounded-lg bg-violet-600 px-4 py-2 text-xs font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
               >
-                Guardar Scrim
+                {saving ? 'Guardando...' : 'Guardar Scrim'}
               </button>
             </div>
           </form>
@@ -1378,6 +1579,16 @@ export default function ScrimsScouting() {
             </div>
 
             <div>
+              <label className="mb-1 block text-[11px] text-zinc-400">Región / Tier</label>
+              <input
+                value={sTier}
+                onChange={(e) => setSTier(e.target.value)}
+                placeholder="Ej: Sovereign / Tier 2"
+                className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-100 outline-none"
+              />
+            </div>
+
+            <div>
               <label className="mb-1 block text-[11px] text-zinc-400">
                 Debilidad / Cómo castigarlos
               </label>
@@ -1410,9 +1621,10 @@ export default function ScrimsScouting() {
               </button>
               <button
                 type="submit"
-                className="rounded-lg bg-violet-600 px-4 py-2 text-xs font-semibold text-white hover:bg-violet-500"
+                disabled={saving}
+                className="rounded-lg bg-violet-600 px-4 py-2 text-xs font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
               >
-                Guardar Rival
+                {saving ? 'Guardando...' : 'Guardar Rival'}
               </button>
             </div>
           </form>
