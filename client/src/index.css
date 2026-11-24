@@ -1,0 +1,229 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+/* =========================================================
+   MOTOR VISUAL NEXT-GEN ESPORTS (Hextech / Worlds / Titanium)
+   ========================================================= */
+:root,
+[data-theme="hextech"] {
+  color-scheme: dark;
+  --bg-base: #040812;
+  --bg-surface: #0a1222;
+  --bg-elevated: #121f36;
+  --border-subtle: rgba(148, 163, 184, 0.13);
+  --border-highlight: rgba(255, 255, 255, 0.09);
+  --border-accent: rgba(245, 158, 11, 0.48);
+  --accent-primary: #f59e0b;
+  --accent-gradient: linear-gradient(135deg, #fbbf24 0%, #d97706 100%);
+  --accent-gradient-hover: linear-gradient(135deg, #fde047 0%, #f59e0b 100%);
+  --accent-soft: rgba(245, 158, 11, 0.14);
+  --accent-text: #fcd34d;
+  --accent-contrast: #040812;
+  --glow-1: rgba(14, 165, 233, 0.16);
+  --glow-2: rgba(245, 158, 11, 0.12);
+  --grid-dot: rgba(148, 163, 184, 0.12);
+}
+
+[data-theme="worlds"] {
+  color-scheme: dark;
+  --bg-base: #030712;
+  --bg-surface: #071326;
+  --bg-elevated: #0e2240;
+  --border-subtle: rgba(56, 189, 248, 0.16);
+  --border-highlight: rgba(255, 255, 255, 0.1);
+  --border-accent: rgba(14, 165, 233, 0.55);
+  --accent-primary: #0ea5e9;
+  --accent-gradient: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+  --accent-gradient-hover: linear-gradient(135deg, #7dd3fc 0%, #0ea5e9 100%);
+  --accent-soft: rgba(14, 165, 233, 0.16);
+  --accent-text: #7dd3fc;
+  --accent-contrast: #030712;
+  --glow-1: rgba(14, 165, 233, 0.2);
+  --glow-2: rgba(45, 212, 191, 0.13);
+  --grid-dot: rgba(56, 189, 248, 0.15);
+}
+
+[data-theme="titanium"] {
+  color-scheme: dark;
+  --bg-base: #060608;
+  --bg-surface: #101014;
+  --bg-elevated: #1b1b22;
+  --border-subtle: rgba(255, 255, 255, 0.1);
+  --border-highlight: rgba(255, 255, 255, 0.16);
+  --border-accent: rgba(248, 250, 252, 0.45);
+  --accent-primary: #f8fafc;
+  --accent-gradient: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+  --accent-gradient-hover: linear-gradient(135deg, #ffffff 0%, #e2e8f0 100%);
+  --accent-soft: rgba(255, 255, 255, 0.11);
+  --accent-text: #ffffff;
+  --accent-contrast: #060608;
+  --glow-1: rgba(255, 255, 255, 0.06);
+  --glow-2: rgba(16, 185, 129, 0.1);
+  --grid-dot: rgba(255, 255, 255, 0.1);
+}
+
+/* Tipografía y fondo atmosférico */
+html,
+body,
+#root {
+  height: 100%;
+  background-color: var(--bg-base);
+  color: #f8fafc;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Fondo con doble iluminación ambiental + malla táctica */
+body {
+  background-image:
+    radial-gradient(ellipse 60% 45% at 15% 0%, var(--glow-1), transparent 65%),
+    radial-gradient(ellipse 55% 45% at 90% 100%, var(--glow-2), transparent 65%),
+    radial-gradient(var(--grid-dot) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 24px 24px;
+  background-attachment: fixed;
+}
+
+/* Superficies Glassmorphism con profundidad y borde de luz superior */
+.bg-zinc-950 {
+  background-color: var(--bg-base) !important;
+}
+.bg-zinc-950\/90 {
+  background-color: color-mix(in srgb, var(--bg-base) 86%, transparent) !important;
+  backdrop-filter: blur(18px);
+  box-shadow: inset 0 1px 0 0 var(--border-highlight), 0 12px 32px -12px rgba(0, 0, 0, 0.8);
+}
+.bg-zinc-950\/80,
+.bg-zinc-950\/70,
+.bg-zinc-950\/60 {
+  background-color: color-mix(in srgb, var(--bg-base) 72%, transparent) !important;
+  backdrop-filter: blur(12px);
+}
+
+.bg-zinc-900,
+.bg-zinc-900\/90,
+.bg-zinc-900\/80,
+.bg-zinc-900\/70,
+.bg-zinc-900\/60 {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-surface) 90%, rgba(255, 255, 255, 0.03)) 0%,
+    color-mix(in srgb, var(--bg-surface) 82%, transparent) 100%
+  ) !important;
+  backdrop-filter: blur(18px);
+  box-shadow: inset 0 1px 0 0 var(--border-highlight), 0 16px 36px -16px rgba(0, 0, 0, 0.75);
+}
+
+.bg-zinc-900\/50,
+.bg-zinc-900\/40 {
+  background-color: color-mix(in srgb, var(--bg-surface) 56%, transparent) !important;
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 0 0 var(--border-highlight);
+}
+
+.bg-zinc-800 {
+  background-color: var(--bg-elevated) !important;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+}
+
+.border-zinc-800,
+.border-zinc-800\/90,
+.border-zinc-800\/80 {
+  border-color: var(--border-subtle) !important;
+}
+
+/* Acentos dinámicos con degradado metálico/cristalino */
+.bg-violet-600,
+.bg-violet-600\/90,
+.bg-violet-600\/95 {
+  background: var(--accent-gradient) !important;
+  color: var(--accent-contrast) !important;
+  font-weight: 700 !important;
+  box-shadow: 0 4px 20px -4px var(--border-accent), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.hover\:bg-violet-500:hover {
+  background: var(--accent-gradient-hover) !important;
+  box-shadow: 0 6px 24px -4px var(--border-accent), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  transform: translateY(-1px);
+}
+
+.bg-violet-600\/20,
+.bg-violet-600\/15,
+.bg-violet-600\/25,
+.bg-violet-500\/15 {
+  background-color: var(--accent-soft) !important;
+}
+
+.text-violet-400,
+.text-violet-300,
+.text-violet-200 {
+  color: var(--accent-text) !important;
+}
+
+.border-violet-500,
+.border-violet-500\/80,
+.border-violet-500\/60,
+.border-violet-500\/40,
+.border-violet-400 {
+  border-color: var(--border-accent) !important;
+}
+
+.ring-violet-500,
+.ring-violet-500\/50,
+.ring-violet-500\/40,
+.ring-violet-500\/30 {
+  --tw-ring-color: var(--border-accent) !important;
+}
+
+.focus\:border-violet-500:focus {
+  border-color: var(--accent-primary) !important;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Inputs modernos y corrección de desplegables nativos en Windows */
+input,
+select,
+textarea {
+  transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+}
+
+select {
+  color-scheme: dark;
+}
+
+select option,
+select optgroup {
+  background-color: var(--bg-surface) !important;
+  color: #f8fafc !important;
+}
+
+/* Micro-interacciones fluidas */
+button {
+  transition: all 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Scrollbars discretos */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.22);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-primary);
+}

@@ -1,0 +1,76 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model SavedPlay {
+  id        String   @id @default(cuid())
+  name      String
+  category  String
+  updatedAt String
+  keyframes Json
+  createdAt DateTime @default(now())
+}
+
+model ScrimMatch {
+  id           String   @id @default(cuid())
+  date         String
+  opponent     String
+  side         String
+  result       String
+  durationMins Int
+  patch        String
+  kills        Int
+  deaths       Int
+  goldDiff8m   Int
+  firstBlood   Boolean  @default(false)
+  firstDragon  Boolean  @default(false)
+  firstHerald  Boolean  @default(false)
+  barons       Int      @default(0)
+  ourComp      Json
+  enemyComp    Json
+  mvp          String
+  focusGoal    String
+  notes        String
+  createdAt    DateTime @default(now())
+}
+
+model ScoutingProfile {
+  id            String   @id @default(cuid())
+  teamName      String
+  regionOrTier  String
+  threatLevel   String
+  playstyle     String
+  tendency      String
+  priorityPicks Json
+  priorityBans  Json
+  weakness      String
+  notes         String
+  createdAt     DateTime @default(now())
+}
+
+model RosterPlayer {
+  id        String   @id @default(cuid())
+  ign       String
+  role      String
+  status    String
+  rank      String
+  notes     String
+  pool      Json
+  createdAt DateTime @default(now())
+}
+
+model VodNote {
+  id        String   @id @default(cuid())
+  videoId   String
+  time      Float
+  tag       String
+  text      String
+  createdAt DateTime @default(now())
+
+  @@index([videoId])
+}
