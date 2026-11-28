@@ -2,18 +2,10 @@ import { io, Socket } from 'socket.io-client';
 
 const RENDER_URL = 'https://wr-coaching-api.onrender.com';
 
-function resolveSocketUrl(): string {
-  const envUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
-  if (envUrl.startsWith('http://') || envUrl.startsWith('https://')) {
-    return envUrl;
-  }
-  return import.meta.env.PROD ? RENDER_URL : 'http://localhost:4000';
-}
+// En producción (Vercel) siempre conecta Socket.io a Render; en local a localhost:4000
+export const API_URL = import.meta.env.PROD ? RENDER_URL : 'http://localhost:4000';
 
-export const API_URL = resolveSocketUrl();
-
-// En producción usa el proxy de vercel.json (/api/...) para evitar bloqueos CORS.
-// En local usa http://localhost:4000.
+// En producción usa el proxy de vercel.json (/api/...) para evitar CORS; en local usa localhost:4000
 const FETCH_BASE_URL = import.meta.env.PROD ? '' : 'http://localhost:4000';
 
 // Conexión única de Socket.io para sincronización en tiempo real (ej. pizarra Playbook)
