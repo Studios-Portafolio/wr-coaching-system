@@ -1,6 +1,16 @@
 import { io, Socket } from 'socket.io-client';
 
-export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const RENDER_URL = 'https://wr-coaching-api.onrender.com';
+
+function resolveApiUrl(): string {
+  const envUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+  if (envUrl.startsWith('http://') || envUrl.startsWith('https://')) {
+    return envUrl;
+  }
+  return import.meta.env.PROD ? RENDER_URL : 'http://localhost:4000';
+}
+
+export const API_URL = resolveApiUrl();
 
 // Conexión única de Socket.io para sincronización en tiempo real (ej. pizarra Playbook)
 export const socket: Socket = io(API_URL, {
