@@ -2,7 +2,7 @@ import { io, Socket } from 'socket.io-client';
 
 const RENDER_URL = 'https://wr-coaching-api.onrender.com';
 
-function resolveApiUrl(): string {
+function resolveSocketUrl(): string {
   const envUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
   if (envUrl.startsWith('http://') || envUrl.startsWith('https://')) {
     return envUrl;
@@ -10,7 +10,11 @@ function resolveApiUrl(): string {
   return import.meta.env.PROD ? RENDER_URL : 'http://localhost:4000';
 }
 
-export const API_URL = resolveApiUrl();
+export const API_URL = resolveSocketUrl();
+
+// En producción usa el proxy de vercel.json (/api/...) para evitar bloqueos CORS.
+// En local usa http://localhost:4000.
+const FETCH_BASE_URL = import.meta.env.PROD ? '' : 'http://localhost:4000';
 
 // Conexión única de Socket.io para sincronización en tiempo real (ej. pizarra Playbook)
 export const socket: Socket = io(API_URL, {
@@ -20,7 +24,7 @@ export const socket: Socket = io(API_URL, {
 
 // Helper genérico para peticiones REST
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${endpoint}`, {
+  const res = await fetch(`${FETCH_BASE_URL}${endpoint}`, {
     headers: {
       'Content-Type': 'application/json',
       ...(options?.headers || {}),
